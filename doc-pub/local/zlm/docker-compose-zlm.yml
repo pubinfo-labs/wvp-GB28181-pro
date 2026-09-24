@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  # ----------------------------- ZLMediaKit -----------------------------
+  wvp-zlm:
+    image: docker.1ms.run/zlmediakit/zlmediakit:master   # 国内加速前缀，按需去掉
+    container_name: wvp-zlm
+    restart: unless-stopped
+    # macOS 的 Docker Desktop 不支持 host 网络语义，这里用 bridge + 显式端口映射
+    ports:
+      - "6080:80"                          # HTTP / API（容器 80）
+      - "10001:10001"                      # RTMP
+      - "10002:10002"                      # RTSP
+      - "10003:10003"                      # RTP 单端口
+      - "30000-30500:30000-30500/udp"      # 国标多端口 RTP（UDP）
+      - "30000-30500:30000-30500/tcp"      # 国标多端口 RTP（TCP 被动模式）
+    volumes:
+      - ./config.ini:/conf/config.ini
+      - ./record:/opt/media/bin/www/record
+    command: ["MediaServer", "-c", "/conf/config.ini", "-l", "0"]

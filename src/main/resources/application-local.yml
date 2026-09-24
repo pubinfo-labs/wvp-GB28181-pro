@@ -1,0 +1,113 @@
+# ============================================================
+# wvp-GB28181-pro 本机调试配置（profile: local）
+#
+# 适用场景：
+#   - WVP 后端在本机 macOS 直接启动
+#   - ZLMediaKit 以 Docker 方式运行，端口映射到宿主机
+#   - MySQL / Redis 使用本机已安装的服务
+#
+# 生效方式：application.yml 中 spring.profiles.active 需为 local
+# 注意：本文件已被 .gitignore 忽略，属于本地私有配置，不会提交
+# ============================================================
+
+spring:
+  # 接口超时时间
+  mvc:
+    async:
+      request-timeout: 20000
+  thymeleaf:
+    cache: false
+  # [可选] 上传文件大小限制
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 100MB
+  cache:
+    type: redis
+  # ------------------- Redis 配置（本机） -------------------
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      database: 7
+      password: redis
+      timeout: 10000
+  # ------------------- MySQL 数据源（本机） -------------------
+  datasource:
+    type: com.zaxxer.hikari.HikariDataSource
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:3306/wvp274?useUnicode=true&characterEncoding=UTF8&rewriteBatchedStatements=true&serverTimezone=PRC&useSSL=false&allowMultiQueries=true&allowPublicKeyRetrieval=true
+    username: root
+    password: Root_123
+
+# WVP 的 HTTP 端口，前端开发服务器代理到这里
+server:
+  port: 18080
+  # HTTPS 默认关闭
+  ssl:
+    enabled: false
+
+# ==================== 作为 GB28181 信令服务器 ====================
+sip:
+  # SIP 监听端口，摄像头注册到此端口
+  port: 8116
+  # 国标编码前十位（ID 统一编码）
+  domain: 4101050000
+  # 平台国标 ID
+  id: 41010500002000000001
+  # 公共认证密码；配置后设备可凭密码直接注册，无需事先在平台添加
+  password: wvp_sip_password
+  # SIP 监听绑定的本机网卡 IP。
+  # 留空时会自动扫描本机所有 IPv4 网卡逐一监听，并全部显示在“接入信息”里；
+  # 这里显式指定为与摄像头同网段的 en8 地址，只在该地址上监听 8116。
+  # 如需多网段接入，可用逗号分隔，例如：172.16.33.171,100.70.6.39
+  ip: 172.16.33.171
+  # 是否存储 alarm 信息
+  alarm: false
+
+# ==================== JT/T 1078 服务配置 ====================
+jt1078:
+  # 开启 1078 服务（关闭时相关接口与接入服务不装配）
+  enable: true
+  # 1078 设备接入的 TCP 端口
+  port: 21078
+  # 设备鉴权密码
+  password: admin123
+
+# ==================== ZLMediaKit 媒体服务器配置 ====================
+media:
+  id: zlmediakit-local
+  # ZLM 的访问地址。本机 Docker 启动，端口已映射到宿主机
+  ip: 172.16.33.171
+  # ZLM 回调 WVP 时使用的地址。容器内无法访问宿主的 127.0.0.1，
+  # 使用 Docker Desktop 提供的 host.docker.internal
+  hook-ip: host.docker.internal
+  # ZLM 的 http.port（已映射到宿主机 6080）
+  http-port: 6080
+  # 必须与 ZLM config.ini 中 hook.admin_params 一致
+  secret: TWSYFgYJOQWB4ftgeYut8DW4wbs7pQnj
+  # 返回流地址时使用的 IP，置空则用 media.ip
+  stream-ip: 172.16.33.171
+  # WVP 在国标信令中使用的 IP，必须是摄像头能够访问到的地址
+  sdp-ip: 172.16.33.171
+  rtp:
+    # 多端口模式，需与 ZLM config.ini 的 rtp_proxy.port_range 保持一致
+    enable: true
+    port-range: 30000,30500
+    # 国标级联发送媒体流的端口范围
+    send-port-range: 30000,30500
+
+# ==================== 业务参数 ====================
+user-settings:
+  # 点播/录像回放等待超时时间（毫秒）
+  play-timeout: 180000
+  # 自动点播，使用固定流地址播放时若未点播则自动点播，需要 rtp.enable=true
+  auto-apply-play: true
+  # 推流直播是否录制
+  record-push-live: true
+  # 国标是否录制
+  record-sip: true
+  # 国标点播按需拉流：有人观看才拉流，无人观看释放
+  stream-on-demand: true
+  # 是否返回 Date 属性，true 不返回（避免摄像头据此自动校时）
+  disable-date-header: false
