@@ -6,6 +6,7 @@ import com.genersoft.iot.vmp.conf.UserSetting;
 import com.genersoft.iot.vmp.conf.exception.ControllerException;
 import com.genersoft.iot.vmp.conf.security.JwtUtils;
 import com.genersoft.iot.vmp.media.bean.MediaServer;
+import com.genersoft.iot.vmp.media.storage.StorageType;
 import com.genersoft.iot.vmp.media.service.IMediaServerService;
 import com.genersoft.iot.vmp.service.ICloudRecordService;
 import com.genersoft.iot.vmp.service.bean.CloudRecordItem;
@@ -478,18 +479,28 @@ public class CloudRecordController {
                     String fileName = DateUtil.timestampMsToUrlToyyyy_MM_dd_HH_mm_ss((long)cloudRecordItem.getStartTime()) + ".mp4";
                     zos.putNextEntry(new ZipEntry(fileName));
 
-                    File file = new File(cloudRecordItem.getFilePath());
-                    if (!file.exists() || file.isDirectory()) {
-                        log.warn("[下载指定录像文件的压缩包] 文件不存在或为目录: {}", cloudRecordItem.getFilePath());
-                        zos.closeEntry();
-                        continue;
-                    }
+                    if (StorageType.isMinio(cloudRecordItem.getStorageType())) {
+                        DownloadFileInfo info = cloudRecordService.getPlayUrlPath(cloudRecordItem.getId());
+                        if (info == null || ObjectUtils.isEmpty(info.getHttpPath())) {
+                            log.warn("[下载指定录像文件的压缩包] 未获取到 MinIO 下载地址: {}", cloudRecordItem.getFilePath());
+                            zos.closeEntry();
+                            continue;
+                        }
+                        HttpUtils.downLoadFile(info.getHttpPath(), zos);
+                    } else {
+                        File file = new File(cloudRecordItem.getFilePath());
+                        if (!file.exists() || file.isDirectory()) {
+                            log.warn("[下载指定录像文件的压缩包] 文件不存在或为目录: {}", cloudRecordItem.getFilePath());
+                            zos.closeEntry();
+                            continue;
+                        }
 
-                    try (FileInputStream fis = new FileInputStream(cloudRecordItem.getFilePath())) {
-                        byte[] buf = new byte[8192]; // 8KB 缓冲区，提高性能
-                        int len;
-                        while ((len = fis.read(buf)) != -1) {
-                            zos.write(buf, 0, len);
+                        try (FileInputStream fis = new FileInputStream(cloudRecordItem.getFilePath())) {
+                            byte[] buf = new byte[8192]; // 8KB 缓冲区，提高性能
+                            int len;
+                            while ((len = fis.read(buf)) != -1) {
+                                zos.write(buf, 0, len);
+                            }
                         }
                     }
                     zos.closeEntry();
@@ -593,8 +604,16 @@ public class CloudRecordController {
             for (CloudRecordItem cloudRecordItem : cloudRecordItemList) {
                 CloudRecordUrl cloudRecordUrl = new CloudRecordUrl();
                 cloudRecordUrl.setId(cloudRecordItem.getId());
-                cloudRecordUrl.setDownloadUrl(remoteHost + "/index/api/downloadFile?file_path=" + cloudRecordItem.getFilePath() + "&save_name=" + cloudRecordItem.getStream() + "_" + cloudRecordItem.getCallId() + "_" + DateUtil.timestampMsToUrlToyyyy_MM_dd_HH_mm_ss((long)cloudRecordItem.getStartTime()));
-                cloudRecordUrl.setPlayUrl(remoteHost + "/index/api/downloadFile?file_path=" + cloudRecordItem.getFilePath());
+                if (StorageType.isMinio(cloudRecordItem.getStorageType())) {
+                    // getPlayUrlPath 每次多一次 queryOne，分页 <= 20 条可接受
+                    DownloadFileInfo info = cloudRecordService.getPlayUrlPath(cloudRecordItem.getId());
+                    String url = info == null ? null : info.getHttpPath();
+                    cloudRecordUrl.setDownloadUrl(url);
+                    cloudRecordUrl.setPlayUrl(url);
+                } else {
+                    cloudRecordUrl.setDownloadUrl(remoteHost + "/index/api/downloadFile?file_path=" + cloudRecordItem.getFilePath() + "&save_name=" + cloudRecordItem.getStream() + "_" + cloudRecordItem.getCallId() + "_" + DateUtil.timestampMsToUrlToyyyy_MM_dd_HH_mm_ss((long)cloudRecordItem.getStartTime()));
+                    cloudRecordUrl.setPlayUrl(remoteHost + "/index/api/downloadFile?file_path=" + cloudRecordItem.getFilePath());
+                }
                 cloudRecordUrlList.add(cloudRecordUrl);
             }
             cloudRecordUrlPageInfo.setList(cloudRecordUrlList);

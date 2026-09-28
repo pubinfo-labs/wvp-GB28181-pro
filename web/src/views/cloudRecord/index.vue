@@ -253,28 +253,22 @@ export default {
         .then((data) => {
           const link = document.createElement('a')
           link.target = '_blank'
-          if (location.protocol === 'https:') {
-            if (data.httpsPath) {
-              link.href = data.httpsPath + '&save_name=' + row.fileName
-            }else if (data.httpPath){
-              link.href = data.httpPath + '&save_name=' + row.fileName
-            }else {
-              this.$message.error({
-                showClose: true,
-                message: '获取下载地址失败'
-              })
-            }
+          // MinIO 预签名 URL 已包含 response-content-disposition，不能再追加参数（否则破坏签名导致 403）
+          const url = location.protocol === 'https:' ? (data.httpsPath || data.httpPath) : (data.httpPath || data.httpsPath)
+          if (!url) {
+            this.$message.error({
+              showClose: true,
+              message: '获取下载地址失败'
+            })
+            return
+          }
+          if (url.includes('X-Amz-')) {
+            // MinIO 预签名 URL：直接使用，通过 download 属性辅助命名
+            link.href = url
+            link.download = row.fileName
           } else {
-            if (data.httpPath) {
-              link.href = data.httpPath + '&save_name=' + row.fileName
-            }else if (data.httpsPath){
-              link.href = data.httpsPath + '&save_name=' + row.fileName
-            }else {
-              this.$message.error({
-                showClose: true,
-                message: '获取下载地址失败'
-              })
-            }
+            // ZLM 本地存储 URL：追加 save_name 参数让 ZLM 设置下载文件名
+            link.href = url + '&save_name=' + row.fileName
           }
           link.click()
         })

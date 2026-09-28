@@ -14,6 +14,17 @@
         autoplay
         live
       />
+      <video
+        v-if="isNativeVideo && videoUrl"
+        ref="nativeVideo"
+        :src="videoUrl"
+        autoplay
+        style="width: 100%; height: 100%; background: #000; object-fit: fill"
+        @timeupdate="onNativeTimeUpdate"
+        @play="playing = true"
+        @pause="playing = false"
+        @ended="playingChange(false)"
+      ></video>
     </div>
     <div class="cloud-record-player-option-box">
       <div class="cloud-record-show-time">
@@ -123,6 +134,10 @@ export default {
     }
   },
   computed: {
+    isNativeVideo() {
+      // MinIO 模式：StreamInfo 无 ws_flv/wss_flv，但带 downLoadFilePath.httpPath 直链
+      return !!(this.streamInfo && this.streamInfo.downLoadFilePath && this.streamInfo.downLoadFilePath.httpPath)
+    },
     playBoxStyle() {
       return this.isFullScreen ? { height: 'calc(100vh - 61px)' } : { height: '100%' }
     },
@@ -199,11 +214,16 @@ export default {
       this.showListCallback(this.showSidebar)
     },
     snap() {
+      if (this.isNativeVideo) {
+        return
+      }
       this.$refs.recordVideoPlayer.screenshot()
     },
     refresh() {
-      this.$refs.recordVideoPlayer.destroy()
-      this.$refs.recordVideoPlayer.playBtnClick()
+      if (this.$refs.recordVideoPlayer && this.$refs.recordVideoPlayer.destroy) {
+        this.$refs.recordVideoPlayer.destroy()
+        this.$refs.recordVideoPlayer.playBtnClick()
+      }
     },
     playLast() {
       this.showLastCallback()
@@ -214,6 +234,10 @@ export default {
     changePlaySpeed(speed) {
       // 倍速播放
       this.playSpeed = speed
+      if (this.isNativeVideo) {
+        if (this.$refs.nativeVideo) this.$refs.nativeVideo.playbackRate = speed
+        return
+      }
       this.$store.dispatch('cloudRecord/speed', {
         mediaServerId: this.streamInfo.mediaServerId,
         app: this.streamInfo.app,
@@ -225,12 +249,17 @@ export default {
       this.$refs.recordVideoPlayer.setPlaybackRate(this.playSpeed)
     },
     changePlayerType(playerType) {
+      if (this.isNativeVideo) {
+        return
+      }
       if (this.playerType === playerType) {
         return
       }
       let streamInfo = this.streamInfo
       let videoUrl = this.videoUrl
-      this.$refs.recordVideoPlayer.destroy()
+      if (this.$refs.recordVideoPlayer && this.$refs.recordVideoPlayer.destroy) {
+        this.$refs.recordVideoPlayer.destroy()
+      }
       this.seekRecord(0, () => {
         this.$nextTick(() => {
           setTimeout(() => {
@@ -254,6 +283,14 @@ export default {
     },
     stopPLay() {
       // 停止
+      if (this.isNativeVideo) {
+        const video = this.$refs.nativeVideo
+        if (video) { video.pause(); video.src = '' }
+        this.streamInfo = null
+        this.playerTime = null
+        this.playSpeed = 1
+        return
+      }
       if (this.$refs.recordVideoPlayer) {
         this.$refs.recordVideoPlayer.destroy()
       }
@@ -263,18 +300,35 @@ export default {
     },
     pausePlay() {
       // 暂停
+      if (this.isNativeVideo) {
+        if (this.$refs.nativeVideo) this.$refs.nativeVideo.pause()
+        return
+      }
       this.$refs.recordVideoPlayer.pause()
-      // TODO
     },
     play() {
+      if (this.isNativeVideo) {
+        if (this.$refs.nativeVideo) this.$refs.nativeVideo.play()
+        return
+      }
       if (this.$refs.recordVideoPlayer.loaded) {
         this.$refs.recordVideoPlayer.unPause()
       } else {
-        this.playRecord()
+        this.$refs.recordVideoPlayer.play(this.videoUrl)
       }
     },
     fullScreen() {
       // 全屏
+      if (this.isNativeVideo) {
+        if (this.isFullScreen) {
+          screenfull.exit()
+          this.isFullScreen = false
+          return
+        }
+        screenfull.request(document.getElementById('cloudRecordPlayer'))
+        this.isFullScreen = true
+        return
+      }
       if (this.isFullScreen) {
         screenfull.exit()
         this.isFullScreen = false
@@ -290,17 +344,38 @@ export default {
       this.isFullScreen = true
     },
     setStreamInfo(streamInfo, timeLen, startTime) {
-      if (location.protocol === 'https:') {
-        this.videoUrl = streamInfo['wss_flv']
-      } else {
-        this.videoUrl = streamInfo['ws_flv']
-      }
-      console.log(location.protocol)
       this.streamInfo = streamInfo
       this.timeLen = timeLen
       this.startTime = startTime
+      if (this.isNativeVideo) {
+        // MinIO：直接用 mp4 直链
+        this.videoUrl = streamInfo.downLoadFilePath.httpPath
+        this.playerType = 'Native'
+      } else {
+        // 本地录像：从 Native 切回时可播放的播放器，避免三块播放区都不渲染导致黑屏
+        if (this.playerType === 'Native') {
+          this.playerType = 'Jessibuca'
+        }
+        if (location.protocol === 'https:') {
+          this.videoUrl = streamInfo['wss_flv']
+        } else {
+          this.videoUrl = streamInfo['ws_flv']
+        }
+      }
     },
     seekRecord(playSeekValue, callback) {
+      if (this.isNativeVideo) {
+        const video = this.$refs.nativeVideo
+        if (video) { video.currentTime = playSeekValue / 1000 }
+        this.playerTime = playSeekValue
+        if (callback) callback(playSeekValue)
+        return
+      }
+      if (!this.streamInfo) {
+        // 播放器销毁（如切换播放器）可能已触发 stopPLay 清空 streamInfo，直接跳过 seek
+        if (callback) callback(playSeekValue)
+        return
+      }
       this.$store.dispatch('cloudRecord/seek', {
         mediaServerId: this.streamInfo.mediaServerId,
         app: this.streamInfo.app,
@@ -323,6 +398,10 @@ export default {
       if (Number(val)) {
         this.playerTime = Number(val)
       }
+    },
+    onNativeTimeUpdate() {
+      const video = this.$refs.nativeVideo
+      if (video) { this.playerTime = video.currentTime * 1000 }
     },
     playingChange(val) {
       this.playing = val

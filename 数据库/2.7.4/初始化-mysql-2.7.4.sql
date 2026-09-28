@@ -381,7 +381,8 @@ create table IF NOT EXISTS wvp_cloud_record
     file_path       character varying(500) COMMENT '完整路径',
     collect         bool default false COMMENT '是否收藏',
     file_size       bigint COMMENT '文件大小',
-    time_len        double precision COMMENT '时长'
+    time_len        double precision COMMENT '时长',
+    storage_type    varchar(16) default 'local' COMMENT '存储方式：local/minio'
 );
 
 -- 平台用户信息

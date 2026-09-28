@@ -272,3 +272,17 @@ springdoc:
         enabled: false
     swagger-ui:
         enabled: false
+
+# 录像存储方式配置
+record:
+    # 存储方式：local-本地磁盘；minio-对象存储
+    storage: local
+    minio:
+        endpoint: http://127.0.0.1:9000
+        access-key: minioadmin
+        secret-key: minioadmin
+        bucket: wvp-record
+        path-prefix: record
+        url-expire-hours: 24
+        # 对外可访问地址（可选），前端访问 MinIO 的地址；留空则用 endpoint
+        public-endpoint:

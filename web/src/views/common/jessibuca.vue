@@ -55,14 +55,25 @@ export default {
     }
   },
   created() {
-    const paramUrl = decodeURIComponent(this.$route.params.url)
-    console.log(paramUrl)
+    const paramUrl = this.$route.params.url ? decodeURIComponent(this.$route.params.url) : null
     if (!this.videoUrl && paramUrl) {
       this.videoUrl = paramUrl
     }
     this.btnDom = document.getElementById('buttonsBox')
   },
-  mounted() {},
+  mounted() {
+    // 组件可能因播放器切换（v-if）新建并带初始 videoUrl，watch 不会触发，这里兜底启动
+    if (this.videoUrl && this.videoUrl !== 'undefined') {
+      this.play(this.videoUrl)
+    }
+  },
+  watch: {
+    videoUrl(newVal) {
+      if (newVal && newVal !== 'undefined') {
+        this.play(newVal)
+      }
+    }
+  },
   destroyed() {
     if (jessibucaPlayer[this._uid]) {
       jessibucaPlayer[this._uid].videoPTS = 0

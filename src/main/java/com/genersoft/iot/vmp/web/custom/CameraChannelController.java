@@ -7,10 +7,12 @@ import com.genersoft.iot.vmp.conf.exception.ControllerException;
 import com.genersoft.iot.vmp.conf.security.JwtUtils;
 import com.genersoft.iot.vmp.gb28181.bean.CommonGBChannel;
 import com.genersoft.iot.vmp.media.bean.MediaServer;
+import com.genersoft.iot.vmp.media.storage.StorageType;
 import com.genersoft.iot.vmp.media.service.IMediaServerService;
 import com.genersoft.iot.vmp.media.zlm.dto.StreamAuthorityInfo;
 import com.genersoft.iot.vmp.service.ICloudRecordService;
 import com.genersoft.iot.vmp.service.bean.CloudRecordItem;
+import com.genersoft.iot.vmp.service.bean.DownloadFileInfo;
 import com.genersoft.iot.vmp.service.bean.ErrorCallback;
 import com.genersoft.iot.vmp.service.bean.InviteErrorCode;
 import com.genersoft.iot.vmp.storager.IRedisCatchStorage;
@@ -602,8 +604,15 @@ public class CameraChannelController {
             for (CloudRecordItem cloudRecordItem : cloudRecordItemList) {
                 CloudRecordUrl cloudRecordUrl = new CloudRecordUrl();
                 cloudRecordUrl.setId(cloudRecordItem.getId());
-                cloudRecordUrl.setDownloadUrl(remoteHost + "/index/api/downloadFile?file_path=" + cloudRecordItem.getFilePath() + "&save_name=" + cloudRecordItem.getStream() + "_" + cloudRecordItem.getCallId() + "_" + DateUtil.timestampMsToUrlToyyyy_MM_dd_HH_mm_ss((long)cloudRecordItem.getStartTime()));
-                cloudRecordUrl.setPlayUrl(remoteHost + "/index/api/downloadFile?file_path=" + cloudRecordItem.getFilePath());
+                if (StorageType.isMinio(cloudRecordItem.getStorageType())) {
+                    DownloadFileInfo info = cloudRecordService.getPlayUrlPath(cloudRecordItem.getId());
+                    String url = info == null ? null : info.getHttpPath();
+                    cloudRecordUrl.setDownloadUrl(url);
+                    cloudRecordUrl.setPlayUrl(url);
+                } else {
+                    cloudRecordUrl.setDownloadUrl(remoteHost + "/index/api/downloadFile?file_path=" + cloudRecordItem.getFilePath() + "&save_name=" + cloudRecordItem.getStream() + "_" + cloudRecordItem.getCallId() + "_" + DateUtil.timestampMsToUrlToyyyy_MM_dd_HH_mm_ss((long)cloudRecordItem.getStartTime()));
+                    cloudRecordUrl.setPlayUrl(remoteHost + "/index/api/downloadFile?file_path=" + cloudRecordItem.getFilePath());
+                }
                 cloudRecordUrlList.add(cloudRecordUrl);
             }
             cloudRecordUrlPageInfo.setList(cloudRecordUrlList);

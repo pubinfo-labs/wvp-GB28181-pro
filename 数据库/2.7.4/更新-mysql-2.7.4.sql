@@ -119,6 +119,23 @@ DROP PROCEDURE wvp_20251027;
 DELIMITER ;
 
 
+/*
+* 20260924 录像存储方式
+*/
+DELIMITER //  -- 重定义分隔符避免分号冲突
+CREATE PROCEDURE `wvp_record_storage_type`()
+BEGIN
+    IF NOT EXISTS (SELECT column_name FROM information_schema.columns
+                   WHERE TABLE_SCHEMA = (SELECT DATABASE()) and  table_name = 'wvp_cloud_record' and column_name = 'storage_type')
+    THEN
+        ALTER TABLE wvp_cloud_record ADD storage_type varchar(16) NOT NULL DEFAULT 'local' COMMENT '存储方式：local/minio';
+    END IF;
+END; //
+call wvp_record_storage_type();
+DROP PROCEDURE wvp_record_storage_type;
+DELIMITER ;
+
+
 
 
 

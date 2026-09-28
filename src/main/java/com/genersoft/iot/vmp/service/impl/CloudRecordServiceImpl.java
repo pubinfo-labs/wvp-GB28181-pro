@@ -4,11 +4,13 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.genersoft.iot.vmp.common.StreamInfo;
 import com.genersoft.iot.vmp.conf.UserSetting;
+import com.genersoft.iot.vmp.conf.RecordStorageConfig;
 import com.genersoft.iot.vmp.conf.exception.ControllerException;
 import com.genersoft.iot.vmp.media.bean.MediaServer;
-import com.genersoft.iot.vmp.media.bean.RecordInfo;
 import com.genersoft.iot.vmp.media.event.media.MediaRecordMp4Event;
 import com.genersoft.iot.vmp.media.service.IMediaServerService;
+import com.genersoft.iot.vmp.media.storage.IRecordStorageService;
+import com.genersoft.iot.vmp.media.storage.StorageType;
 import com.genersoft.iot.vmp.media.zlm.AssistRESTfulUtils;
 import com.genersoft.iot.vmp.media.zlm.dto.StreamAuthorityInfo;
 import com.genersoft.iot.vmp.service.ICloudRecordService;
@@ -25,19 +27,23 @@ import com.github.pagehelper.PageHelper;
 import com.github.pagehelper.PageInfo;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.ObjectUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
 
+import jakarta.annotation.PostConstruct;
 import java.io.File;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -60,6 +66,20 @@ public class CloudRecordServiceImpl implements ICloudRecordService {
 
     @Autowired
     private IRedisRpcPlayService redisRpcPlayService;
+
+    @Autowired
+    private RecordStorageConfig recordStorageConfig;
+
+    @Autowired
+    private List<IRecordStorageService> storageServices;
+
+    private Map<String, IRecordStorageService> storageServiceMap;
+
+    @PostConstruct
+    void initStorageServiceMap() {
+        storageServiceMap = storageServices.stream()
+                .collect(Collectors.toMap(IRecordStorageService::getType, s -> s));
+    }
 
     @Override
     public PageInfo<CloudRecordItem> getList(int page, int count, String query, String app, String stream, String startTime,
@@ -127,8 +147,22 @@ public class CloudRecordServiceImpl implements ICloudRecordService {
                 cloudRecordItem.setCallId(streamAuthorityInfo.getCallId());
             }
         }
-        log.info("[添加录像记录] {}/{}, callId: {}, 内容：{}", event.getApp(), event.getStream(), cloudRecordItem.getCallId(), event.getRecordInfo());
-        cloudRecordServiceMapper.add(cloudRecordItem);
+        log.info("[添加录像记录] {}/{}, callId: {}, 存储: {}, 内容：{}", event.getApp(), event.getStream(),
+                cloudRecordItem.getCallId(), cloudRecordItem.getStorageType(), event.getRecordInfo());
+        String localFilePath = cloudRecordItem.getFilePath();
+        IRecordStorageService storageService = storageServiceMap.get(recordStorageConfig.getStorage());
+        cloudRecordItem = storageService.beforeStore(event, cloudRecordItem);
+        try {
+            cloudRecordServiceMapper.add(cloudRecordItem);
+        } catch (Exception e) {
+            // 写库失败：回滚刚上传的 MinIO 对象，避免孤儿对象（ZLM 本地文件未被删除，保留降级余量）
+            if (StorageType.isMinio(cloudRecordItem.getStorageType())) {
+                storageServiceMap.get(StorageType.MINIO.getType()).deleteRecordFile(cloudRecordItem, null);
+            }
+            throw e;
+        }
+        // 写库成功后再执行存储后置处理（minio 删除本地文件）
+        storageServiceMap.get(cloudRecordItem.getStorageType()).afterStore(cloudRecordItem, localFilePath);
     }
 
     @Override
@@ -151,11 +185,39 @@ public class CloudRecordServiceImpl implements ICloudRecordService {
 
         List<MediaServer> mediaServers = new ArrayList<>();
         mediaServers.add(mediaServerItem);
-        // 检索相关的录像文件
-        List<String> filePathList = cloudRecordServiceMapper.queryRecordFilePathList(app, stream, startTimeStamp,
-                endTimeStamp, callId, filterMediaServer ? mediaServers : null);
-        if (filePathList == null || filePathList.isEmpty()) {
+        // 检索相关的录像文件（需要 storageType 判断存储方式）
+        List<CloudRecordItem> recordItems = cloudRecordServiceMapper.queryRecordByAppStreamTimeAndCallId(app, stream,
+                startTimeStamp, endTimeStamp, callId, filterMediaServer ? mediaServers : null);
+        if (recordItems == null || recordItems.isEmpty()) {
             throw new ControllerException(ErrorCode.ERROR100.getCode(), "未检索到视频文件");
+        }
+        boolean hasMinio = recordItems.stream().anyMatch(i -> StorageType.isMinio(i.getStorageType()));
+        List<String> filePathList;
+        if (hasMinio) {
+            // 临时下载目录必须位于 ZLM 录像目录内（assist 合并时按该路径读取文件）
+            String recordPath = mediaServerItem.getRecordPath();
+            if (StringUtils.isBlank(recordPath)) {
+                throw new ControllerException(ErrorCode.ERROR100.getCode(), "未配置录像路径，MinIO 合并任务暂不支持");
+            }
+            String tempDir = recordPath + File.separator + ".merge-tmp";
+            File dir = new File(tempDir);
+            if (!dir.exists() && !dir.mkdirs()) {
+                throw new ControllerException(ErrorCode.ERROR100.getCode(), "创建临时目录失败，MinIO 合并任务暂不支持");
+            }
+            filePathList = new ArrayList<>();
+            for (CloudRecordItem item : recordItems) {
+                if (StorageType.isMinio(item.getStorageType())) {
+                    String localPath = storageServiceMap.get(StorageType.MINIO.getType()).downloadToLocal(item, tempDir);
+                    if (localPath == null) {
+                        throw new ControllerException(ErrorCode.ERROR100.getCode(), "MinIO 录像临时下载失败: " + item.getFileName());
+                    }
+                    filePathList.add(localPath);
+                } else {
+                    filePathList.add(item.getFilePath());
+                }
+            }
+        } else {
+            filePathList = recordItems.stream().map(CloudRecordItem::getFilePath).collect(Collectors.toList());
         }
         JSONObject result =  assistRESTfulUtils.addTask(mediaServerItem, app, stream, startTime, endTime, callId, filePathList, remoteHost);
         if (result.getInteger("code") != 0) {
@@ -252,10 +314,7 @@ public class CloudRecordServiceImpl implements ICloudRecordService {
         if (!userSetting.getServerId().equals(recordItem.getServerId())) {
             return redisRpcPlayService.getRecordPlayUrl(recordItem.getServerId(), recordId);
         }
-
-        MediaServer mediaServer = mediaServerService.getOne(recordItem.getMediaServerId());
-
-        return mediaServerService.getDownloadFilePath(mediaServer, RecordInfo.getInstance(recordItem));
+        return storageServiceMap.get(recordItem.getStorageType()).getDownloadFileInfo(recordItem);
     }
 
     @Override
@@ -296,6 +355,19 @@ public class CloudRecordServiceImpl implements ICloudRecordService {
         }
         if (mediaServer == null) {
             throw new ControllerException(ErrorCode.ERROR100.getCode(), "无可用流媒体");
+        }
+        if (StorageType.isMinio(recordItem.getStorageType())) {
+            DownloadFileInfo downloadFileInfo = storageServiceMap.get(StorageType.MINIO.getType()).getDownloadFileInfo(recordItem);
+            StreamInfo streamInfo = new StreamInfo();
+            streamInfo.setApp(app);
+            streamInfo.setStream(stream);
+            streamInfo.setDuration(recordItem.getTimeLen());
+            streamInfo.setDownLoadFilePath(downloadFileInfo);
+            // 必须设置 mediaServer：CloudRecordController.loadRecord 回调会读取
+            // streamInfo.getMediaServer().getTranscodeSuffix()，为 null 会 NPE 导致点播接口 500
+            streamInfo.setMediaServer(mediaServer);
+            callback.run(ErrorCode.SUCCESS.getCode(), ErrorCode.SUCCESS.getMsg(), streamInfo);
+            return;
         }
         String fileName = recordItem.getFileName().substring(0 , recordItem.getFileName().indexOf("."));
         String filePath = recordItem.getFilePath();
@@ -362,12 +434,11 @@ public class CloudRecordServiceImpl implements ICloudRecordService {
         StringBuilder stringBuilder = new StringBuilder();
         for (CloudRecordItem cloudRecordItem : cloudRecordItemList) {
             String date = new File(cloudRecordItem.getFilePath()).getParentFile().getName();
-            MediaServer mediaServer = mediaServerService.getOne(cloudRecordItem.getMediaServerId());
+            IRecordStorageService storageService = storageServiceMap.get(cloudRecordItem.getStorageType());
             try {
-                boolean deleteResult = mediaServerService.deleteRecordDirectory(mediaServer, cloudRecordItem.getApp(),
-                        cloudRecordItem.getStream(), date, cloudRecordItem.getFileName());
+                boolean deleteResult = storageService.deleteRecordFile(cloudRecordItem, date);
                 if (deleteResult) {
-                    log.warn("[录像文件] 删除磁盘文件成功： {}", cloudRecordItem.getFilePath());
+                    log.warn("[录像文件] 删除文件成功： {}", cloudRecordItem.getFilePath());
                     cloudRecordItemIdListForDelete.add(cloudRecordItem);
                 }
             }catch (ControllerException e) {
@@ -418,9 +489,8 @@ public class CloudRecordServiceImpl implements ICloudRecordService {
             if (!userSetting.getServerId().equals(cloudRecordItem.getServerId())) {
                 cloudRecordUrl.setDownloadUrl(redisRpcPlayService.getRecordPlayUrl(cloudRecordItem.getServerId(), cloudRecordItem.getId()).getHttpPath());
             }else {
-                MediaServer mediaServer = mediaServerService.getOne(cloudRecordItem.getMediaServerId());
-                mediaServer.setStreamIp(mediaServer.getIp());
-                DownloadFileInfo downloadFilePath = mediaServerService.getDownloadFilePath(mediaServer, RecordInfo.getInstance(cloudRecordItem));
+                DownloadFileInfo downloadFilePath = storageServiceMap
+                        .get(cloudRecordItem.getStorageType()).getDownloadFileInfo(cloudRecordItem);
                 cloudRecordUrl.setDownloadUrl(downloadFilePath.getHttpPath());
             }
             resultList.add(cloudRecordUrl);

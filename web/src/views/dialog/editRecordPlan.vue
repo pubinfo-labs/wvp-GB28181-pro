@@ -17,7 +17,7 @@
           </el-form-item>
           <el-form-item>
             <div class="content">
-              <weekTimePicker ref="weekTimePicker" :plan-array="planArray" />
+              <weekTimePicker ref="weekTimePicker" :plan-array="planArray" @update:planArray="planArray = $event" />
             </div>
           </el-form-item>
           <el-form-item>

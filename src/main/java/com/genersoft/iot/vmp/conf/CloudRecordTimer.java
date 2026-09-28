@@ -1,20 +1,25 @@
 package com.genersoft.iot.vmp.conf;
 
 
-import com.genersoft.iot.vmp.conf.exception.ControllerException;
 import com.genersoft.iot.vmp.media.bean.MediaServer;
 import com.genersoft.iot.vmp.media.service.IMediaServerService;
+import com.genersoft.iot.vmp.media.storage.IRecordStorageService;
+import com.genersoft.iot.vmp.media.storage.StorageType;
 import com.genersoft.iot.vmp.service.bean.CloudRecordItem;
 import com.genersoft.iot.vmp.storager.dao.CloudRecordServiceMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import jakarta.annotation.PostConstruct;
 import java.io.File;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 录像文件定时删除
@@ -28,6 +33,17 @@ public class CloudRecordTimer {
 
     @Autowired
     private CloudRecordServiceMapper cloudRecordServiceMapper;
+
+    @Autowired
+    private List<IRecordStorageService> storageServices;
+
+    private Map<String, IRecordStorageService> storageServiceMap;
+
+    @PostConstruct
+    void initStorageServiceMap() {
+        storageServiceMap = storageServices.stream()
+                .collect(Collectors.toMap(IRecordStorageService::getType, s -> s));
+    }
 
     /**
      * 定时查询待删除的录像文件
@@ -59,19 +75,45 @@ public class CloudRecordTimer {
                 }
                 // TODO 后续可以删除空了的过期日期文件夹
                 for (CloudRecordItem cloudRecordItem : cloudRecordItemList) {
-                    String date = new File(cloudRecordItem.getFilePath()).getParentFile().getName();
                     try {
-                        boolean deleteResult = mediaServerService.deleteRecordDirectory(mediaServerItem, cloudRecordItem.getApp(),
-                                cloudRecordItem.getStream(), date, cloudRecordItem.getFileName());
-                        if (deleteResult) {
-                            log.warn("[录像文件定时清理] 删除磁盘文件成功： {}", cloudRecordItem.getFilePath());
+                        IRecordStorageService storageService = storageServiceMap.get(cloudRecordItem.getStorageType());
+                        boolean deleteResult;
+                        if (StorageType.isMinio(cloudRecordItem.getStorageType())) {
+                            deleteResult = storageService.deleteRecordFile(cloudRecordItem, null);
+                        } else {
+                            String date = new File(cloudRecordItem.getFilePath()).getParentFile().getName();
+                            deleteResult = storageService.deleteRecordFile(cloudRecordItem, date);
                         }
-                    }catch (ControllerException ignored) {}
-
+                        if (deleteResult) {
+                            log.warn("[录像文件定时清理] 删除文件成功： {}", cloudRecordItem.getFilePath());
+                        }
+                    } catch (Exception e) {
+                        log.warn("[录像文件定时清理] 删除失败： {}, 原因: {}", cloudRecordItem.getFilePath(), e.getMessage());
+                    }
                 }
+                // 沿用原有语义：无论文件删除成功与否，过期记录行都统一清理
                 result += cloudRecordServiceMapper.deleteList(cloudRecordItemList);
             }
         }
         log.info("[录像文件定时清理] 共清理{}个过期录像文件", result);
+    }
+
+    /** 每天 1 点清理合并任务临时目录中超过 1 天的文件 */
+    @Scheduled(cron = "0 0 1 * * ?")
+    public void cleanMergeTemp() {
+        List<MediaServer> servers = mediaServerService.getAllOnline();
+        long expire = System.currentTimeMillis() - 24 * 60 * 60 * 1000L;
+        for (MediaServer server : servers) {
+            if (StringUtils.isBlank(server.getRecordPath())) continue;
+            File tempDir = new File(server.getRecordPath(), ".merge-tmp");
+            if (!tempDir.isDirectory()) continue;
+            File[] files = tempDir.listFiles();
+            if (files == null) continue;
+            for (File f : files) {
+                if (f.isFile() && f.lastModified() < expire && f.delete()) {
+                    log.info("[合并临时文件清理] 删除: {}", f.getAbsolutePath());
+                }
+            }
+        }
     }
 }

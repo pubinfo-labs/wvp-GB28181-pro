@@ -42,3 +42,7 @@ ALTER table wvp_device_channel ADD COLUMN IF NOT EXISTS enable_broadcast integer
 ALTER table wvp_device_channel ADD COLUMN IF NOT EXISTS map_level integer default 0;
 ALTER table wvp_common_group ADD COLUMN IF NOT EXISTS alias varchar(255) default null;
 ALTER table wvp_stream_proxy DROP COLUMN IF EXISTS enable_remove_none_reader;
+
+-- 20260924 录像存储方式
+ALTER TABLE wvp_cloud_record ADD COLUMN IF NOT EXISTS storage_type varchar(16) NOT NULL DEFAULT 'local';
+COMMENT ON COLUMN wvp_cloud_record.storage_type IS '存储方式：local/minio';

@@ -679,7 +679,8 @@ create table IF NOT EXISTS wvp_cloud_record
     file_path       character varying(500),
     collect         bool default false,
     file_size       int8,
-    time_len        double precision
+    time_len        double precision,
+    storage_type    varchar(16) default 'local'
 );
 COMMENT ON TABLE wvp_cloud_record IS '云端录像记录';
 COMMENT ON COLUMN wvp_cloud_record.id IS '主键ID';
@@ -696,6 +697,7 @@ COMMENT ON COLUMN wvp_cloud_record.file_path IS '完整路径';
 COMMENT ON COLUMN wvp_cloud_record.collect IS '是否收藏';
 COMMENT ON COLUMN wvp_cloud_record.file_size IS '文件大小';
 COMMENT ON COLUMN wvp_cloud_record.time_len IS '时长';
+COMMENT ON COLUMN wvp_cloud_record.storage_type IS '存储方式：local/minio';
 
 
 drop table IF EXISTS wvp_user;

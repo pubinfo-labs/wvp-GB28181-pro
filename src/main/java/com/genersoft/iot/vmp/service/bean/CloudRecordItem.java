@@ -2,6 +2,7 @@ package com.genersoft.iot.vmp.service.bean;
 
 import com.genersoft.iot.vmp.media.event.media.MediaRecordMp4Event;
 import com.genersoft.iot.vmp.media.event.media.MediaRecordProcessEvent;
+import com.genersoft.iot.vmp.media.storage.StorageType;
 import com.genersoft.iot.vmp.utils.MediaServerUtils;
 import lombok.Data;
 
@@ -86,6 +87,11 @@ public class CloudRecordItem {
      * 所属服务ID
      */
     private String serverId;
+
+    /**
+     * 存储方式，取值见 {@link StorageType}
+     */
+    private String storageType = StorageType.LOCAL.getType();
 
     public static CloudRecordItem getInstance(MediaRecordMp4Event param) {
         CloudRecordItem cloudRecordItem = new CloudRecordItem();

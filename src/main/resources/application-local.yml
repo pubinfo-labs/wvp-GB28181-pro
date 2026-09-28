@@ -111,3 +111,19 @@ user-settings:
   stream-on-demand: true
   # 是否返回 Date 属性，true 不返回（避免摄像头据此自动校时）
   disable-date-header: false
+
+# ==================== 录像存储方式配置 ====================
+record:
+  # 存储方式：local-本地磁盘；minio-对象存储（切换为 minio 后新录像上传 MinIO，历史 local 记录不受影响）
+  storage: minio
+  minio:
+    # MinIO S3 API 端点（注意：9001 是控制台端口，API 用 9000）
+    endpoint: http://192.168.111.62:9000
+    access-key: minioadmin
+    secret-key: zJBENzMqZ4s8mjdXjtjQQw7Y
+    # 目标 bucket（已确认存在）
+    bucket: vision-file
+    path-prefix: record
+    url-expire-hours: 24
+    # 对外可访问地址（可选），浏览器访问 MinIO 的地址；留空则用 endpoint
+    public-endpoint:

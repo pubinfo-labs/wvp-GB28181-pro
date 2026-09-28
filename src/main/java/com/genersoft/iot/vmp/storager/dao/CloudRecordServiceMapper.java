@@ -23,7 +23,8 @@ public interface CloudRecordServiceMapper {
             " file_path," +
             " file_size," +
             " server_id," +
-            " time_len ) " +
+            " time_len," +
+            " storage_type ) " +
             "VALUES (" +
             " #{app}," +
             " #{stream}," +
@@ -36,7 +37,8 @@ public interface CloudRecordServiceMapper {
             " #{filePath}," +
             " #{fileSize}," +
             " #{serverId}," +
-            " #{timeLen})" +
+            " #{timeLen}," +
+            " #{storageType})" +
             " </script>")
     int add(CloudRecordItem cloudRecordItem);
 
@@ -81,6 +83,23 @@ public interface CloudRecordServiceMapper {
     List<String> queryRecordFilePathList(@Param("app") String app, @Param("stream") String stream,
                                   @Param("startTimeStamp")Long startTimeStamp, @Param("endTimeStamp")Long endTimeStamp,
                                   @Param("callId")String callId, List<MediaServer> mediaServerItemList);
+
+    @Select(" <script>" +
+            "select *" +
+            " from wvp_cloud_record " +
+            " where 0=0 " +
+            " <if test= 'app != null '> and app=#{app}</if>" +
+            " <if test= 'stream != null '> and stream=#{stream}</if>" +
+            " <if test= 'startTimeStamp != null '> and end_time &gt;= #{startTimeStamp}</if>" +
+            " <if test= 'endTimeStamp != null '> and start_time &lt;= #{endTimeStamp}</if>" +
+            " <if test= 'callId != null '> and call_id=#{callId}</if>" +
+            " <if test= 'mediaServerItemList != null  ' > and media_server_id in " +
+            " <foreach collection='mediaServerItemList' item='item' open='(' separator=',' close=')' > #{item.id}</foreach>" +
+            " </if>" +
+            " </script>")
+    List<CloudRecordItem> queryRecordByAppStreamTimeAndCallId(@Param("app") String app, @Param("stream") String stream,
+            @Param("startTimeStamp") Long startTimeStamp, @Param("endTimeStamp") Long endTimeStamp,
+            @Param("callId") String callId, List<MediaServer> mediaServerItemList);
 
     @Update(" <script>" +
             "update wvp_cloud_record set collect = #{collect} where file_path in " +

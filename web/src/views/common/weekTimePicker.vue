@@ -148,9 +148,18 @@ export default {
     }
   },
   watch: {
-    planArray: function(array) {
-      for (let i = 0; i < array.length; i++) {
-        this.weekData[i].data = array[i].data
+    planArray: {
+      // immediate: 弹窗为 destroy-on-close，每次打开都会重建本组件，
+      // 若不在挂载时同步一次，weekData 与父组件 planArray 将各自持有不同引用，
+      // 导致编辑回显丢失、用户绘制/复制的时间段无法传给父组件（保存时丢失）
+      immediate: true,
+      handler: function(array) {
+        if (!Array.isArray(array)) {
+          return
+        }
+        for (let i = 0; i < array.length && i < this.weekData.length; i++) {
+          this.weekData[i].data = array[i].data
+        }
       }
     }
   },
@@ -263,6 +272,8 @@ export default {
         this.startPointTrack.trackIndex = null
         this.startPointTrack.x = null
         this.startPointTrack.clientWidth = null
+        // trackHandler 会整体替换 data 引用，需要同步回父组件，否则保存时丢失
+        this.updateValue()
         return
       }
 
@@ -273,6 +284,8 @@ export default {
         this.endPointTrack.trackIndex = null
         this.endPointTrack.x = null
         this.endPointTrack.clientWidth = null
+        // trackHandler 会整体替换 data 引用，需要同步回父组件，否则保存时丢失
+        this.updateValue()
         return
       }
       if (this.tempTrack.index === null) {
@@ -384,6 +397,8 @@ export default {
       }
 
       this.closeCopyBox(index)
+      // $set 整体替换了 data 引用，必须同步回父组件，否则复制的时间段保存时丢失
+      this.updateValue()
     },
     closeCopyBox: function(index) {
       this.weekDataCheckBox = [false, false, false, false, false, false, false]
